@@ -1,0 +1,23 @@
+# Compiled binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test and coverage artifacts
+*.out
+*.test
+coverage.txt
+
+# Environment files
+.env
+*.local
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

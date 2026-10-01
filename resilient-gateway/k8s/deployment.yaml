@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resilient-gateway-deployment
+  labels:
+    app: resilient-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: resilient-gateway
+  template:
+    metadata:
+      labels:
+        app: resilient-gateway
+    spec:
+      # Volume shared between main Go container and sidecar
+      volumes:
+        - name: shared-logs
+          emptyDir: {}
+
+      # 1. Init Container: Wait for Redis dependency
+      initContainers:
+        - name: wait-for-redis
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z -w 2 redis-service 6379; do
+                echo "Waiting for Redis to be ready at redis-service:6379..."
+                sleep 2
+              done
+              echo "Redis is reachable. Starting application."
+
+      containers:
+        # 2. Main Application Container
+        - name: gateway
+          image: harishk990/resilient-gateway:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: gateway-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: shared-logs
+              mountPath: /var/log/app
+
+          # Zero-downtime draining hook
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sleep", "5"]
+
+          # Health Probes
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+
+        # 3. Sidecar Container: Log / Metric helper
+        - name: log-sidecar
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Log sidecar initialized. Tailing system events..."
+              while true; do
+                sleep 15
+              done
+          volumeMounts:
+            - name: shared-logs
+              mountPath: /var/log/app
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "32Mi"
+            limits:
+              cpu: "50m"
+              memory: "64Mi"
